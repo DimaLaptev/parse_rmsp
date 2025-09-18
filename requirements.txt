@@ -1,0 +1,9 @@
+requests>=2.25.1
+beautifulsoup4>=4.9.3
+selenium>=4.0.0
+lxml>=4.6.3
+
+# Альтернативы для работы без ChromeDriver:
+requests-html>=0.10.0
+playwright>=1.30.0
+
