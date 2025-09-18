@@ -15,7 +15,9 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 from selenium.common.exceptions import TimeoutException, WebDriverException
+from webdriver_manager.chrome import ChromeDriverManager
 
 
 class RMSPParser:
@@ -57,7 +59,7 @@ class RMSPParser:
     
     def setup_chrome_driver(self):
         """
-        Настройка Chrome WebDriver
+        Настройка Chrome WebDriver с автоматической загрузкой ChromeDriver
         
         Returns:
             webdriver: Настроенный драйвер
@@ -71,12 +73,19 @@ class RMSPParser:
         chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
         
         try:
-            driver = webdriver.Chrome(options=chrome_options)
+            print("Инициализация WebDriver Manager...")
+            # Автоматическая загрузка и установка ChromeDriver
+            service = Service(ChromeDriverManager().install())
+            driver = webdriver.Chrome(service=service, options=chrome_options)
             driver.implicitly_wait(10)
+            print("✅ ChromeDriver успешно инициализирован")
             return driver
-        except WebDriverException as e:
-            print(f"Ошибка при инициализации Chrome WebDriver: {e}")
-            print("Убедитесь, что Chrome и ChromeDriver установлены")
+        except Exception as e:
+            print(f"❌ Ошибка при инициализации ChromeDriver: {e}")
+            print("Возможные решения:")
+            print("1. Убедитесь, что Chrome браузер установлен")
+            print("2. Проверьте подключение к интернету")
+            print("3. Попробуйте запустить от имени администратора")
             return None
     
     def search_with_selenium(self, inn):
