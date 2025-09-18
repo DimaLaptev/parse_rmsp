@@ -15,16 +15,15 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
 from selenium.common.exceptions import TimeoutException, WebDriverException
-from webdriver_manager.chrome import ChromeDriverManager
 
 
 class RMSPParser:
     """Класс для парсинга данных с сайта РМСП"""
     
-    def __init__(self):
+    def __init__(self, chromedriver_port=64095):
         self.base_url = "https://rmsp.nalog.ru/search.html#"
+        self.chromedriver_port = chromedriver_port
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -59,33 +58,45 @@ class RMSPParser:
     
     def setup_chrome_driver(self):
         """
-        Настройка Chrome WebDriver с автоматической загрузкой ChromeDriver
+        Подключение к уже запущенному ChromeDriver
         
         Returns:
             webdriver: Настроенный драйвер
         """
-        chrome_options = Options()
-        chrome_options.add_argument('--headless')  # Запуск без GUI
-        chrome_options.add_argument('--no-sandbox')
-        chrome_options.add_argument('--disable-dev-shm-usage')
-        chrome_options.add_argument('--disable-gpu')
-        chrome_options.add_argument('--window-size=1920,1080')
-        chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
-        
         try:
-            print("Инициализация WebDriver Manager...")
-            # Автоматическая загрузка и установка ChromeDriver
-            service = Service(ChromeDriverManager().install())
-            driver = webdriver.Chrome(service=service, options=chrome_options)
+            print(f"Подключение к ChromeDriver на порту {self.chromedriver_port}...")
+            
+            # Проверяем доступность ChromeDriver
+            test_response = requests.get(f"http://127.0.0.1:{self.chromedriver_port}/status", timeout=3)
+            if test_response.status_code != 200:
+                print(f"❌ ChromeDriver не отвечает на порту {self.chromedriver_port}")
+                return None
+            
+            # Настройки для подключения к удаленному ChromeDriver
+            chrome_options = Options()
+            chrome_options.add_argument('--headless')
+            chrome_options.add_argument('--no-sandbox')
+            chrome_options.add_argument('--disable-dev-shm-usage')
+            chrome_options.add_argument('--disable-gpu')
+            chrome_options.add_argument('--window-size=1920,1080')
+            
+            # Подключаемся к запущенному ChromeDriver
+            driver = webdriver.Remote(
+                command_executor=f'http://127.0.0.1:{self.chromedriver_port}',
+                options=chrome_options
+            )
+            
             driver.implicitly_wait(10)
-            print("✅ ChromeDriver успешно инициализирован")
+            print("✅ Подключение к ChromeDriver успешно")
             return driver
+            
+        except requests.exceptions.ConnectionError:
+            print(f"❌ ChromeDriver недоступен на порту {self.chromedriver_port}")
+            print("Убедитесь, что ChromeDriver запущен:")
+            print(f"   chromedriver --port={self.chromedriver_port}")
+            return None
         except Exception as e:
-            print(f"❌ Ошибка при инициализации ChromeDriver: {e}")
-            print("Возможные решения:")
-            print("1. Убедитесь, что Chrome браузер установлен")
-            print("2. Проверьте подключение к интернету")
-            print("3. Попробуйте запустить от имени администратора")
+            print(f"❌ Ошибка подключения к ChromeDriver: {e}")
             return None
     
     def search_with_selenium(self, inn):
@@ -188,8 +199,10 @@ class RMSPParser:
             print(f"Ошибка при поиске: {e}")
             return None
         finally:
+            # НЕ закрываем драйвер, так как он запущен внешне
+            # Только закрываем текущую сессию
             try:
-                driver.quit()
+                driver.close()
             except:
                 pass
     
@@ -432,17 +445,35 @@ class RMSPParser:
 
 def main():
     """Основная функция программы"""
-    print("РМСП Парсер - Поиск по ИНН")
-    print("=" * 30)
+    print("РМСП Парсер - Подключение к запущенному ChromeDriver")
+    print("=" * 55)
     
-    parser = RMSPParser()
+    # Получаем порт ChromeDriver из аргументов или используем по умолчанию
+    chromedriver_port = 64095
+    inn = None
     
-    # Получение ИНН из аргументов командной строки или пользовательского ввода
     if len(sys.argv) > 1:
-        inn = sys.argv[1]
-        print(f"ИНН из аргументов командной строки: {inn}")
-    else:
+        # Если передан только ИНН
+        if sys.argv[1].isdigit() and len(sys.argv[1]) in [10, 12]:
+            inn = sys.argv[1]
+        else:
+            # Если передан порт и ИНН
+            try:
+                chromedriver_port = int(sys.argv[1])
+                if len(sys.argv) > 2:
+                    inn = sys.argv[2]
+            except ValueError:
+                inn = sys.argv[1]  # Если первый аргумент не число, считаем его ИНН
+    
+    print(f"Используется ChromeDriver на порту: {chromedriver_port}")
+    
+    parser = RMSPParser(chromedriver_port)
+    
+    # Получение ИНН
+    if not inn:
         inn = input("Введите ИНН для поиска: ")
+    else:
+        print(f"ИНН: {inn}")
     
     if inn:
         parser.search_by_inn(inn)
