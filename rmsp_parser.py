@@ -21,7 +21,7 @@ from selenium.common.exceptions import TimeoutException, WebDriverException
 class RMSPParser:
     """Класс для парсинга данных с сайта РМСП"""
     
-    def __init__(self, chromedriver_port=64095):
+    def __init__(self, chromedriver_port=51532):
         self.base_url = "https://rmsp.nalog.ru/search.html#"
         self.chromedriver_port = chromedriver_port
         self.session = requests.Session()
@@ -222,6 +222,7 @@ class RMSPParser:
             'organization_name': '',
             'category': '',
             'inclusion_date': '',
+            'exclusion_date': '',
             'region': '',
             'inn': '',
             'ogrn': '',
@@ -266,13 +267,14 @@ class RMSPParser:
                 data_row = None
                 for row in rows[1:]:  # Пропускаем заголовок
                     cells = row.find_all(['td', 'th'])
-                    if len(cells) >= 4:  # Должно быть достаточно колонок
+                    if len(cells) >= 4:  # Должно быть достаточно колонок (4 или 5)
                         data_row = row
                         break
                 
                 if data_row:
                     cells = data_row.find_all(['td', 'th'])
                     result['found'] = True
+                    print(f"🔍 Найдена таблица с {len(cells)} столбцами")
                     
                     # Извлекаем данные из колонок таблицы
                     if len(cells) > 0:
@@ -295,6 +297,12 @@ class RMSPParser:
                     if len(cells) > 3:
                         # Четвертая колонка - дата включения
                         result['inclusion_date'] = cells[3].get_text(strip=True)
+                    
+                    if len(cells) > 4:
+                        # Пятая колонка - дата исключения (для "Не является субъектом МСП")
+                        exclusion_cell_text = cells[4].get_text(strip=True)
+                        if exclusion_cell_text and exclusion_cell_text != '-':
+                            result['exclusion_date'] = exclusion_cell_text
                     
                     # Ищем ИНН и ОГРН в полном тексте строки
                     full_row_text = data_row.get_text()
@@ -350,12 +358,17 @@ class RMSPParser:
                             result['category'] = cells[1].get_text(strip=True) if len(cells) > 1 else ''
                             result['region'] = cells[2].get_text(strip=True) if len(cells) > 2 else ''
                             result['inclusion_date'] = cells[3].get_text(strip=True) if len(cells) > 3 else ''
+                            # Пятый столбец - дата исключения
+                            if len(cells) > 4:
+                                exclusion_text = cells[4].get_text(strip=True)
+                                if exclusion_text and exclusion_text != '-':
+                                    result['exclusion_date'] = exclusion_text
                     break
             
             # Если все еще не найдено, ищем через JavaScript переменные
             if not result['found']:
                 page_text = soup.get_text()
-                if 'RSMP_CATEGORY' in page_text and any(word in page_text for word in ['Микропредприятие', 'Малое предприятие', 'Среднее предприятие']):
+                if 'RSMP_CATEGORY' in page_text and any(word in page_text for word in ['Микропредприятие', 'Малое предприятие', 'Среднее предприятие', 'Не является субъектом МСП']):
                     result['found'] = True
                     result['organization_name'] = 'Организация найдена (требуется уточнение названия)'
                     
@@ -366,6 +379,29 @@ class RMSPParser:
                         result['category'] = 'Малое предприятие'
                     elif 'Среднее предприятие' in page_text:
                         result['category'] = 'Среднее предприятие'
+                    elif 'Не является субъектом МСП' in page_text:
+                        result['category'] = 'Не является субъектом МСП'
+        
+        # Дополнительный поиск даты исключения если не найдена в таблице
+        if result['found'] and result['category'] == 'Не является субъектом МСП' and not result['exclusion_date']:
+            print("🔍 Дополнительный поиск даты исключения...")
+            
+            # Ищем дату исключения в различных форматах по всему тексту
+            exclusion_patterns = [
+                r'дата исключения[:\s]*(\d{1,2}[.\-/]\d{1,2}[.\-/]\d{2,4})',
+                r'исключен[а-я]*[:\s]*(\d{1,2}[.\-/]\d{1,2}[.\-/]\d{2,4})',
+                r'дата выбытия[:\s]*(\d{1,2}[.\-/]\d{1,2}[.\-/]\d{2,4})',
+                r'выбыл[а-я]*[:\s]*(\d{1,2}[.\-/]\d{1,2}[.\-/]\d{2,4})',
+                r'исключение[:\s]*(\d{1,2}[.\-/]\d{1,2}[.\-/]\d{2,4})'
+            ]
+            
+            full_page_text = soup.get_text()
+            for pattern in exclusion_patterns:
+                exclusion_match = re.search(pattern, full_page_text, re.IGNORECASE)
+                if exclusion_match:
+                    result['exclusion_date'] = exclusion_match.group(1)
+                    print(f"✅ Найдена дата исключения по шаблону: {result['exclusion_date']}")
+                    break
         
         return result
     
@@ -436,6 +472,11 @@ class RMSPParser:
             inclusion_date = result.get('inclusion_date', 'Не указана')
             print(f"3. ДАТА ВКЛЮЧЕНИЯ: {inclusion_date}")
             
+            # 4. ДАТА ИСКЛЮЧЕНИЯ (только для "Не является субъектом МСП")
+            if category == 'Не является субъектом МСП':
+                exclusion_date = result.get('exclusion_date', 'Не указана')
+                print(f"4. ДАТА ИСКЛЮЧЕНИЯ: {exclusion_date}")
+            
             # Дополнительная информация (если нужна)
             if result.get('organization_name') and 'JavaScript' not in result.get('organization_name', ''):
                 print(f"\nНазвание: {result['organization_name']}")
@@ -449,7 +490,7 @@ def main():
     print("=" * 55)
     
     # Получаем порт ChromeDriver из аргументов или используем по умолчанию
-    chromedriver_port = 64095
+    chromedriver_port = 51532
     inn = None
     
     if len(sys.argv) > 1:
